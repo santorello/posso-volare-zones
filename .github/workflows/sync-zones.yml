@@ -1,0 +1,42 @@
+name: Sync Zone D-Flight
+
+on:
+  # Ogni giorno alle 03:00 UTC
+  schedule:
+    - cron: '0 3 * * *'
+
+  # Trigger manuale dal pannello GitHub (Actions → Run workflow)
+  workflow_dispatch:
+
+jobs:
+  sync:
+    name: Download e aggiorna zone di volo
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Installa dipendenze Python
+        run: pip install requests
+
+      - name: Sync zone da D-Flight
+        env:
+          DFLIGHT_USER: ${{ secrets.DFLIGHT_USER }}
+          DFLIGHT_PASS: ${{ secrets.DFLIGHT_PASS }}
+        run: python dflight_sync.py
+
+      - name: Commit e push aggiornamenti
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add zones/italy_zones.json zones/metadata.json
+          git diff --staged --quiet && echo "ℹ️ Nessuna modifica alle zone." || (
+            git commit -m "🗺️ Zone aggiornate $(date +'%Y-%m-%d')" &&
+            git push
+          )
