@@ -15,7 +15,6 @@ import os
 import sys
 import json
 import gzip
-import time
 from datetime import date, datetime, timezone
 
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
@@ -55,9 +54,9 @@ def try_get_xsrf_via_app_navigation(page, context):
         try:
             print(f"   → Provo {app_url}")
             page.goto(app_url, wait_until="domcontentloaded", timeout=25_000)
-            # Aspetta l'inizializzazione Angular (max 8s)
+            # Aspetta l'inizializzazione Angular (max 8s) — wait_for_timeout cede il controllo a Playwright
             for _ in range(8):
-                time.sleep(1)
+                page.wait_for_timeout(1000)
                 cookies = context.cookies()
                 xsrf = next((c["value"] for c in cookies if c["name"] == "XSRF-TOKEN"), None)
                 if xsrf:
@@ -89,73 +88,90 @@ def try_login_via_form(page, context):
 
     page.on("response", on_response)
 
-    # Prova prima ad andare all'app, poi cerca il form
-    for app_url in APP_URLS:
-        try:
-            page.goto(app_url, wait_until="domcontentloaded", timeout=25_000)
-            page.wait_for_timeout(3000)
+    # Naviga alla pagina di login (URL diretto, già verificato funzionante)
+    login_url = APP_URLS[0]
+    try:
+        page.goto(login_url, wait_until="domcontentloaded", timeout=25_000)
+        page.wait_for_timeout(3000)
 
-            # Selettori comuni per campo email/username in Angular
-            email_selectors = [
-                "input[type='email']",
-                "input[formcontrolname='username']",
-                "input[formcontrolname='email']",
-                "input[name='username']",
-                "input[name='email']",
-                "input[placeholder*='email' i]",
-                "input[placeholder*='utente' i]",
-                "input[placeholder*='user' i]",
-            ]
-            email_el = None
-            for sel in email_selectors:
-                try:
-                    page.wait_for_selector(sel, timeout=2000)
-                    email_el = sel
-                    break
-                except Exception:
-                    pass
+        # Selettori per campo email/username in Angular
+        email_selectors = [
+            "input[formcontrolname='username']",
+            "input[formcontrolname='email']",
+            "input[type='email']",
+            "input[name='username']",
+            "input[name='email']",
+            "input[placeholder*='email' i]",
+            "input[placeholder*='utente' i]",
+        ]
+        email_el = None
+        for sel in email_selectors:
+            try:
+                page.wait_for_selector(sel, timeout=2000)
+                email_el = sel
+                break
+            except Exception:
+                pass
 
-            if not email_el:
-                print(f"   ⚠️  Form non trovato su {app_url}")
-                continue
+        if not email_el:
+            print(f"   ⚠️  Form non trovato su {login_url}")
+            page.remove_listener("response", on_response)
+            return None
 
-            print(f"   ✅ Form trovato su {app_url} (selettore: {email_el})")
+        print(f"   ✅ Form trovato (selettore: {email_el})")
 
-            # Compila il form
-            page.fill(email_el, DFLIGHT_USER)
-            for sel in ["input[type='password']", "input[formcontrolname='password']", "input[name='password']"]:
-                try:
-                    page.fill(sel, DFLIGHT_PASS)
-                    break
-                except Exception:
-                    pass
+        # Compila email
+        page.fill(email_el, DFLIGHT_USER)
 
-            # Click sul pulsante di login
-            for sel in [
-                "button[type='submit']",
-                "input[type='submit']",
-                "button:has-text('Accedi')",
-                "button:has-text('Login')",
-                "button:has-text('Entra')",
-                "[class*='login' i] button",
-                "form button",
-            ]:
-                try:
-                    page.click(sel, timeout=2000)
-                    break
-                except Exception:
-                    pass
+        # Compila password
+        for sel in ["input[type='password']", "input[formcontrolname='password']", "input[name='password']"]:
+            try:
+                page.fill(sel, DFLIGHT_PASS)
+                print("   ✅ Password compilata")
+                break
+            except Exception:
+                pass
 
-            # Aspetta la risposta del token (max 10s)
-            for _ in range(10):
-                time.sleep(1)
-                if captured.get("access_token"):
-                    return captured["access_token"]
+        # Click submit
+        clicked = False
+        for sel in [
+            "button[type='submit']",
+            "input[type='submit']",
+            "button:has-text('Accedi')",
+            "button:has-text('Login')",
+            "button:has-text('Entra')",
+            "form button",
+        ]:
+            try:
+                page.click(sel, timeout=2000)
+                print(f"   ✅ Submit cliccato ({sel})")
+                clicked = True
+                break
+            except Exception:
+                pass
 
-        except PlaywrightTimeout:
-            print(f"   ⚠️  Timeout su {app_url}")
-        except Exception as e:
-            print(f"   ⚠️  Errore su {app_url}: {e}")
+        if not clicked:
+            print("   ⚠️  Nessun pulsante submit trovato, provo Enter sul campo password")
+            try:
+                page.keyboard.press("Enter")
+                clicked = True
+            except Exception:
+                pass
+
+        # Aspetta la risposta del token (max 15s) — IMPORTANTE: usa wait_for_timeout
+        # non time.sleep, altrimenti Playwright non può processare gli eventi di rete
+        for i in range(15):
+            page.wait_for_timeout(1000)   # cede il controllo a Playwright ogni secondo
+            if captured.get("access_token"):
+                page.remove_listener("response", on_response)
+                return captured["access_token"]
+            if i == 4:
+                print("   ⏳ Attendo risposta token... (5s)")
+
+    except PlaywrightTimeout:
+        print(f"   ⚠️  Timeout su {login_url}")
+    except Exception as e:
+        print(f"   ⚠️  Errore: {e}")
 
     page.remove_listener("response", on_response)
     return captured.get("access_token")
