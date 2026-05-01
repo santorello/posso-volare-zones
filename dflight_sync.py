@@ -241,12 +241,28 @@ with sync_playwright() as p:
     # Download zone
     # ------------------------------------------------------------------
     print("📥 Download zone di volo...")
+
+    # Leggi XSRF-TOKEN dal cookie jar del browser (impostato dall'app Angular)
+    post_login_cookies = context.cookies()
+    xsrf_after_login = next(
+        (c["value"] for c in post_login_cookies if c["name"] == "XSRF-TOKEN"),
+        None,
+    )
+    print(f"   → XSRF-TOKEN post-login: {bool(xsrf_after_login)}")
+
+    download_headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Accept":        "application/octet-stream, application/json, */*",
+        "Origin":        BASE_URL,
+        "Referer":       f"{BASE_URL}/",
+    }
+    if xsrf_after_login:
+        download_headers["X-XSRF-TOKEN"] = xsrf_after_login
+        download_headers["X-CSRF-TOKEN"]  = xsrf_after_login
+
     zones_resp = page.request.get(
         DOWNLOAD_URL,
-        headers={
-            "Authorization": f"Bearer {access_token}",
-            "Accept":        "application/octet-stream, application/json, */*",
-        },
+        headers=download_headers,
         timeout=120_000,
     )
 
