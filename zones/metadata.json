@@ -1,8 +1,8 @@
 {
-  "date": "2024-01-01",
-  "updated_at": "2024-01-01T00:00:00Z",
+  "date": "2026-05-01",
+  "updated_at": "2026-05-01T22:48:00Z",
   "source": "d-flight.it",
-  "version": 0,
-  "size_bytes": 0,
-  "note": "Placeholder — verrà sovrascritto al primo sync automatico"
+  "version": 1,
+  "size_bytes": 15390738,
+  "note": "Versione iniziale — bundle app build Mar 2024"
 }
