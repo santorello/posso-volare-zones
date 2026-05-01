@@ -23,7 +23,10 @@ jobs:
           python-version: '3.12'
 
       - name: Installa dipendenze Python
-        run: pip install requests
+        run: pip install playwright
+
+      - name: Installa Chromium (Playwright)
+        run: playwright install chromium --with-deps
 
       - name: Sync zone da D-Flight
         env:
