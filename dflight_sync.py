@@ -19,12 +19,24 @@ from datetime import date, datetime, timezone
 # ---------------------------------------------------------------------------
 # Configurazione
 # ---------------------------------------------------------------------------
-TOKEN_URL = "https://www.d-flight.it/auth-iam/token"
-DOWNLOAD_URL = "https://www.d-flight.it/geo-awareness/api/ed-269/geo-zones/download"
+BASE_URL    = "https://www.d-flight.it"
+LOGIN_PAGE  = f"{BASE_URL}/private/dashboard"
+TOKEN_URL   = f"{BASE_URL}/auth-iam/token"
+DOWNLOAD_URL = f"{BASE_URL}/geo-awareness/api/ed-269/geo-zones/download"
 
-ZONES_DIR = "zones"
-ZONES_FILE = f"{ZONES_DIR}/italy_zones.json"
+ZONES_DIR     = "zones"
+ZONES_FILE    = f"{ZONES_DIR}/italy_zones.json"
 METADATA_FILE = f"{ZONES_DIR}/metadata.json"
+
+HEADERS_BASE = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Origin":  BASE_URL,
+    "Referer": f"{BASE_URL}/",
+}
 
 # ---------------------------------------------------------------------------
 # 1. Leggi credenziali da environment
@@ -37,11 +49,24 @@ if not DFLIGHT_USER or not DFLIGHT_PASS:
     sys.exit(1)
 
 # ---------------------------------------------------------------------------
-# 2. Login → ottieni access token
+# 2. Sessione con cookie — pre-flight GET per ottenere cookie CSRF
+# ---------------------------------------------------------------------------
+session = requests.Session()
+session.headers.update(HEADERS_BASE)
+
+print("🌐 Pre-flight GET per cookie CSRF...")
+try:
+    pre = session.get(LOGIN_PAGE, timeout=15, allow_redirects=True)
+    print(f"   → {pre.status_code}, cookies: {list(session.cookies.keys())}")
+except Exception as e:
+    print(f"⚠️  Pre-flight fallita (continuo comunque): {e}")
+
+# ---------------------------------------------------------------------------
+# 3. Login → ottieni access token
 # ---------------------------------------------------------------------------
 print("🔐 Login su D-Flight...")
 
-login_resp = requests.post(
+login_resp = session.post(
     TOKEN_URL,
     data={
         "scope": "openid email profile user-data personal-data pilot-license dflight-identification",
@@ -53,13 +78,12 @@ login_resp = requests.post(
     headers={
         "Content-Type": "application/x-www-form-urlencoded",
         "Accept": "application/json, text/plain, */*",
-        "User-Agent": "Mozilla/5.0",
     },
     timeout=30,
 )
 
 if login_resp.status_code != 200:
-    print(f"❌ Login fallito: {login_resp.status_code} — {login_resp.text[:200]}")
+    print(f"❌ Login fallito: {login_resp.status_code} — {login_resp.text[:300]}")
     sys.exit(1)
 
 access_token = login_resp.json().get("access_token")
@@ -70,16 +94,15 @@ if not access_token:
 print("✅ Login riuscito.")
 
 # ---------------------------------------------------------------------------
-# 3. Download zone (file .json.gz)
+# 4. Download zone (file .json.gz)
 # ---------------------------------------------------------------------------
 print("📥 Download zone di volo...")
 
-zones_resp = requests.get(
+zones_resp = session.get(
     DOWNLOAD_URL,
     headers={
         "Authorization": f"Bearer {access_token}",
         "Accept": "application/json, text/plain, */*",
-        "User-Agent": "Mozilla/5.0",
     },
     timeout=120,
 )
@@ -91,22 +114,29 @@ if zones_resp.status_code != 200:
 print(f"✅ Download completato ({len(zones_resp.content) / 1024:.0f} KB compressi).")
 
 # ---------------------------------------------------------------------------
-# 4. Decomprimi gzip → JSON
+# 5. Decomprimi gzip → JSON
 # ---------------------------------------------------------------------------
 print("📦 Decompressione gzip...")
 
 try:
     json_bytes = gzip.decompress(zones_resp.content)
-    json_str = json_bytes.decode("utf-8")
-    # Valida che sia JSON valido
-    json.loads(json_str)
+    json_str   = json_bytes.decode("utf-8")
+    json.loads(json_str)  # valida
     print(f"✅ JSON valido ({len(json_bytes) / 1024:.0f} KB decompressi).")
 except Exception as e:
-    print(f"❌ Errore decompressione/parsing JSON: {e}")
-    sys.exit(1)
+    # Potrebbe non essere gzip — proviamo a usarlo direttamente
+    print(f"⚠️  Gzip fallito ({e}), provo a leggere il body diretto...")
+    try:
+        json_str   = zones_resp.text
+        json_bytes = json_str.encode("utf-8")
+        json.loads(json_str)
+        print(f"✅ JSON diretto valido ({len(json_bytes) / 1024:.0f} KB).")
+    except Exception as e2:
+        print(f"❌ Impossibile leggere il file zone: {e2}")
+        sys.exit(1)
 
 # ---------------------------------------------------------------------------
-# 5. Salva file zone
+# 6. Salva file zone
 # ---------------------------------------------------------------------------
 os.makedirs(ZONES_DIR, exist_ok=True)
 
@@ -116,9 +146,8 @@ with open(ZONES_FILE, "w", encoding="utf-8") as f:
 print(f"✅ Zone salvate in {ZONES_FILE}")
 
 # ---------------------------------------------------------------------------
-# 6. Aggiorna metadata.json
+# 7. Aggiorna metadata.json
 # ---------------------------------------------------------------------------
-# Leggi versione precedente se esiste
 version = 1
 if os.path.exists(METADATA_FILE):
     try:
@@ -129,11 +158,11 @@ if os.path.exists(METADATA_FILE):
         version = 1
 
 metadata = {
-    "date": date.today().isoformat(),
-    "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-    "source": "d-flight.it",
-    "version": version,
-    "size_bytes": len(json_bytes),
+    "date":        date.today().isoformat(),
+    "updated_at":  datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "source":      "d-flight.it",
+    "version":     version,
+    "size_bytes":  len(json_bytes),
 }
 
 with open(METADATA_FILE, "w", encoding="utf-8") as f:
