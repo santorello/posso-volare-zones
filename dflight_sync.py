@@ -27,11 +27,11 @@ BASE_URL     = "https://www.d-flight.it"
 TOKEN_URL    = f"{BASE_URL}/auth-iam/token"
 DOWNLOAD_URL = f"{BASE_URL}/geo-awareness/api/ed-269/geo-zones/download"
 
-# URL della SPA Angular (non la homepage WordPress)
+# URL della SPA Angular — pagina di login con form
 APP_URLS = [
-    f"{BASE_URL}/private/dashboard",
-    f"{BASE_URL}/private",
-    f"{BASE_URL}/dflight",
+    f"{BASE_URL}/web-app/authentication/(authentication:login)",
+    f"{BASE_URL}/web-app/authentication",
+    f"{BASE_URL}/web-app",
 ]
 
 ZONES_DIR     = "zones"
