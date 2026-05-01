@@ -20,7 +20,7 @@ from datetime import date, datetime, timezone
 # Configurazione
 # ---------------------------------------------------------------------------
 BASE_URL    = "https://www.d-flight.it"
-LOGIN_PAGE  = f"{BASE_URL}/private/dashboard"
+LOGIN_PAGE  = f"{BASE_URL}/"
 TOKEN_URL   = f"{BASE_URL}/auth-iam/token"
 DOWNLOAD_URL = f"{BASE_URL}/geo-awareness/api/ed-269/geo-zones/download"
 
@@ -49,15 +49,21 @@ if not DFLIGHT_USER or not DFLIGHT_PASS:
     sys.exit(1)
 
 # ---------------------------------------------------------------------------
-# 2. Sessione con cookie — pre-flight GET per ottenere cookie CSRF
+# 2. Sessione — pre-flight GET per ottenere cookie/token CSRF
 # ---------------------------------------------------------------------------
 session = requests.Session()
 session.headers.update(HEADERS_BASE)
 
 print("🌐 Pre-flight GET per cookie CSRF...")
+csrf_token = None
 try:
     pre = session.get(LOGIN_PAGE, timeout=15, allow_redirects=True)
-    print(f"   → {pre.status_code}, cookies: {list(session.cookies.keys())}")
+    # Cerca XSRF-TOKEN nei cookie (pattern Spring Security / Angular)
+    csrf_token = session.cookies.get("XSRF-TOKEN") or session.cookies.get("csrf")
+    # Cerca anche negli header della risposta
+    if not csrf_token:
+        csrf_token = pre.headers.get("X-CSRF-TOKEN") or pre.headers.get("X-XSRF-TOKEN")
+    print(f"   → {pre.status_code}, cookies: {list(session.cookies.keys())}, csrf: {bool(csrf_token)}")
 except Exception as e:
     print(f"⚠️  Pre-flight fallita (continuo comunque): {e}")
 
@@ -65,6 +71,15 @@ except Exception as e:
 # 3. Login → ottieni access token
 # ---------------------------------------------------------------------------
 print("🔐 Login su D-Flight...")
+
+login_headers = {
+    "Content-Type": "application/x-www-form-urlencoded",
+    "Accept": "application/json, text/plain, */*",
+    "X-Requested-With": "XMLHttpRequest",
+}
+if csrf_token:
+    login_headers["X-XSRF-TOKEN"] = csrf_token
+    login_headers["X-CSRF-TOKEN"] = csrf_token
 
 login_resp = session.post(
     TOKEN_URL,
@@ -75,10 +90,7 @@ login_resp = session.post(
         "username": DFLIGHT_USER,
         "password": DFLIGHT_PASS,
     },
-    headers={
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Accept": "application/json, text/plain, */*",
-    },
+    headers=login_headers,
     timeout=30,
 )
 
@@ -165,8 +177,4 @@ metadata = {
     "size_bytes":  len(json_bytes),
 }
 
-with open(METADATA_FILE, "w", encoding="utf-8") as f:
-    json.dump(metadata, f, indent=2)
-
-print(f"✅ Metadata aggiornato: versione {version}, data {date.today()}")
-print("\n🎉 Sync completato con successo!")
+with open(METADATA_FILE, "w", encoding="utf-8"
