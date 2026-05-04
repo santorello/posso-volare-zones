@@ -1,8 +1,7 @@
 {
-  "date": "2026-04-25",
-  "updated_at": "2026-04-25T21:52:01Z",
+  "date": "2026-05-04",
+  "updated_at": "2026-05-04T05:56:48Z",
   "source": "d-flight.it",
-  "version": 2,
-  "size_bytes": 15549179,
-  "note": "Dataset D-Flight 25/04/2026 — 4653 zone, include NOTAM temporanei"
+  "version": 3,
+  "size_bytes": 15405652
 }
